@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Estimador de Demanda - Agroquímica</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f3f4f6; margin: 0; padding: 2rem; color: #1f2937; }
+    .card { max-width: 680px; margin: 0 auto; background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    h1 { margin-top: 0; font-size: 1.4rem; color: #111827; }
+    .subtitle { color: #6b7280; margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    label { display: block; font-size: 0.82rem; font-weight: 600; margin-bottom: 0.3rem; color: #374151; }
+    input, select { width: 100%; box-sizing: border-box; padding: 0.55rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; }
+    button { width: 100%; margin-top: 1.5rem; background: #059669; color: white; padding: 0.75rem; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 1rem; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .result { margin-top: 1.5rem; padding: 1.2rem; border-radius: 8px; display: none; }
+    .result.success { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+    .result.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #ffffff; border-radius: 50%; border-top-color: transparent; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Módulo Inteligente de Estimación de Demanda</h1>
+    <div class="subtitle">Pronóstico semanal por sucursal y producto para optimización de inventario</div>
+    
+    <form id="demandForm">
+      <div class="grid">
+        <div>
+          <label>Sucursal:</label>
+          <select id="branch_id" required>
+            <option value="Sucursal_Norte">Sucursal Norte</option>
+            <option value="Sucursal_Sur">Sucursal Sur</option>
+            <option value="Sucursal_Central">Sucursal Central</option>
+          </select>
+        </div>
+        <div>
+          <label>Producto:</label>
+          <select id="product_id" required>
+            <option value="PROD_GLIFO" data-cat="Herbicida">Glifosato 480 SL (Herbicida)</option>
+            <option value="PROD_PARAQUAT" data-cat="Herbicida">Paraquat 200 SL (Herbicida)</option>
+            <option value="PROD_ATRAZINA" data-cat="Herbicida">Atrazina 500 SC (Herbicida)</option>
+            <option value="PROD_CLORPI" data-cat="Insecticida">Clorpirifos 48 EC (Insecticida)</option>
+            <option value="PROD_MANCO" data-cat="Fungicida">Mancozeb 80 WP (Fungicida)</option>
+            <option value="PROD_UREA_FOL" data-cat="Fertilizante">Fertilizante Foliar NPK</option>
+          </select>
+        </div>
+        <div>
+          <label>Semana del Año (1 a 52):</label>
+          <input type="number" id="week_of_year" min="1" max="52" value="44" required />
+        </div>
+        <div>
+          <label>Época de Lluvias:</label>
+          <select id="is_rainy_season">
+            <option value="1">Sí (Alta humedad)</option>
+            <option value="0">No (Seca)</option>
+          </select>
+        </div>
+        <div>
+          <label>¿Aplica Promoción?:</label>
+          <select id="promo_applied">
+            <option value="0">No</option>
+            <option value="1">Sí</option>
+          </select>
+        </div>
+        <div>
+          <label>Demanda Semana t-1 [L]:</label>
+          <input type="number" step="0.1" id="lag_1_demand" value="115.0" required />
+        </div>
+        <div>
+          <label>Demanda Semana t-2 [L]:</label>
+          <input type="number" step="0.1" id="lag_2_demand" value="108.0" required />
+        </div>
+        <div>
+          <label>Promedio Móvil 4 Sem. [L]:</label>
+          <input type="number" step="0.1" id="rolling_mean_4w" value="105.0" required />
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn">Calcular Estimación de Demanda</button>
+    </form>
+
+    <div id="outputCard" class="result"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById("demandForm");
+    const submitBtn = document.getElementById("submitBtn");
+    const outputCard = document.getElementById("outputCard");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      outputCard.style.display = "none";
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner"></span> Procesando inferencia...';
+
+      const prodSelect = document.getElementById("product_id");
+      const category = prodSelect.options[prodSelect.selectedIndex].getAttribute("data-cat");
+
+      const payload = {
+        branch_id: document.getElementById("branch_id").value,
+        product_id: prodSelect.value,
+        product_category: category,
+        week_of_year: parseInt(document.getElementById("week_of_year").value),
+        is_rainy_season: parseInt(document.getElementById("is_rainy_season").value),
+        promo_applied: parseInt(document.getElementById("promo_applied").value),
+        lag_1_demand: parseFloat(document.getElementById("lag_1_demand").value),
+        lag_2_demand: parseFloat(document.getElementById("lag_2_demand").value),
+        lag_4_demand: parseFloat(document.getElementById("lag_2_demand").value) * 0.95,
+        rolling_mean_4w: parseFloat(document.getElementById("rolling_mean_4w").value)
+      };
+
+      try {
+        const response = await fetch("http://127.0.0.1:8000/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        outputCard.style.display = "block";
+
+        if (response.ok) {
+          outputCard.className = "result success";
+          outputCard.innerHTML = `
+            <strong>Demanda Estimada:</strong> ${data.estimated_demand_liters} Litros / Unidades<br/>
+            <small>Modelo: ${data.model_version} | Inferencia completada con éxito.</small>
+          `;
+        } else {
+          outputCard.className = "result error";
+          outputCard.innerHTML = `<strong>Error en la solicitud:</strong> ${data.detail || JSON.stringify(data)}`;
+        }
+      } catch (err) {
+        outputCard.style.display = "block";
+        outputCard.className = "result error";
+        outputCard.innerHTML = `<strong>Error de conexión:</strong> No se pudo conectar con el backend (FastAPI no está corriendo en el puerto 8000).`;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Calcular Estimación de Demanda";
+      }
+    });
+  </script>
+</body>
+</html>
